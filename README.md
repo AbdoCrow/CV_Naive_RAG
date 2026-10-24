@@ -1,56 +1,59 @@
-# CV-Based Naive RAG (CLI)
+﻿# CV RAG chatbot
 
-A small command-line Retrieval-Augmented Generation app that answers questions using text retrieved from a CV PDF. It uses Python, LangChain, Chroma, and the OpenAI API. No advanced RAG optimization is used.
+A small CLI that answers questions about the included CV using LangChain, Chroma, and OpenAI.
 
-## Architecture
+## Run
 
-1. **Load:** `PyPDFLoader` reads `cv.pdf`.
-2. **Split:** `RecursiveCharacterTextSplitter` creates 500-character chunks with 50-character overlap.
-3. **Embed and store:** `OpenAIEmbeddings` (`text-embedding-3-small`) creates embeddings stored in an in-memory Chroma vector store.
-4. **Retrieve:** Chroma selects the four most similar CV chunks for each question.
-5. **Generate:** `gpt-4o-mini` answers using the retrieved context only, or states that the information is unavailable.
-
-The CV is indexed once when the program starts and reused for all questions in that session.
-
-## Setup and running
-
-Requires Python 3.10+ and an OpenAI API key with API access/billing.
+Requires Python 3.10+ and an OpenAI API key.
 
 ```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-# macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-1. Place your CV PDF in this folder and rename it `cv.pdf`.
-2. Copy `.env.example` to `.env`, then add your OpenAI API key.
-3. Run:
+Copy `.env.example` to `.env` and set `OPENAI_API_KEY`. Keep the included
+`Abdalrahman E. Mohamed CV .pdf` beside `app.py`, then run:
 
 ```bash
 python app.py
 ```
 
-Type questions at the `Question:` prompt. Type `exit` to quit. The CLI displays each answer and the retrieved excerpts (including page numbers) for evaluation.
+Type `exit` to quit or `clear` to reset memory.
+The CLI prints the original question and the generated MultiQuery search questions.
+The first CV chunk is always included so the model can see the candidate's name
+even when a broad identity question does not retrieve the header.
 
-## Testing and evaluation
+## Task 1: evaluation and memory
 
-| Question | Expected outcome |
-|---|---|
-| What programming languages does the candidate know? | Python, C++, Dart, Kotlin, Java, SQL, if the correct skills chunk is retrieved. |
-| What is the candidate's GPA? | 3.51/4.00, if retrieved. |
-| Where did the candidate work as a data engineering intern? | Summit Technology Solutions. |
-| What methods were used in industrial machine sound classification? | Log-mel spectrograms and a 2D CNN. |
-| What is the candidate's passport number? | “The information is not available in the CV.” |
+```bash
+python evaluate.py
+```
 
-For each test, assess whether the retrieved snippets are relevant and whether the generated answer is supported by them. The example outcomes are expectations based on the sample CV, not guaranteed model results.
+This runs six standalone questions about the name, skills, GPA, an internship, a project,
+and missing information. It also checks a follow-up question that needs memory.
+It prints each answer, PASS/FAIL, and a total, returning exit code 1 if any check fails.
+Expected facts come from the sample CV. Keyword checks can miss correct paraphrases
+and do not prove that every statement is correct, so read the printed answers too.
 
-## Repository contents
+The chatbot uses LangChain's `RunnableWithMessageHistory` with an in-memory
+`InMemoryChatMessageHistory`. This helps with follow-ups like "What was the name
+of that company again?" Memory lasts only until the program exits. Each standalone
+evaluation case starts with empty memory.
 
-- `app.py` — command-line RAG program.
-- `requirements.txt` — Python dependencies.
-- `.env.example` — API key template.
-- `.gitignore` — excludes `.env`, `cv.pdf`, and temporary files.
-- `README.md` — setup and evaluation instructions.
+## Task 2: retrieval techniques
 
-Do not upload your API key or personal CV to a public repository. For sharing the dataset, use a redacted CV only with permission. API usage may incur charges.
+The PDF is split into 500-character chunks with 50-character overlap. Embeddings use
+`text-embedding-3-small`, and answers use `gpt-4o-mini`.
+
+- **Pre-retrieval: MultiQuery**, from `PreRetrieval/Query Translation + Routing.ipynb`.
+  I chose it because questions may use different words from the CV. The model writes
+  three search versions, using recent messages to understand follow-ups. The app
+  searches the original question and these versions, getting four chunks per query.
+- **Post-retrieval: Reciprocal Rank Fusion (RRF)**, from the RAG-Fusion section in
+  `PostRetrieval/PostRetrieval.ipynb`. I chose it because it combines the search
+  results with a short formula and needs no extra service. A chunk gets
+  `1 / (60 + rank)` from each result list (rank starts at 1). Scores for repeated
+  chunks are added, and the four highest-scoring chunks go to the answer model.
+
+These choices add searches and one model call per question. Improved accuracy has
+not been established by comparing against the original app. Running the app or
+evaluation uses the real API and incurs usage costs. Keep your API key private.
